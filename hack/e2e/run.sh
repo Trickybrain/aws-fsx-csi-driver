@@ -47,12 +47,37 @@ AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 IMAGE_NAME=${IMAGE_NAME:-${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${DRIVER_NAME}}
 IMAGE_TAG=${IMAGE_TAG:-${TEST_ID}}
 
-# kops: must include patch version (e.g. 1.19.1)
-# eksctl: mustn't include patch version (e.g. 1.19)
-K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION:-1.34.0}}
-K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION:-1.34}}
+# Auto-detect K8S version from e2e test module
+K8S_VERSION_FROM_GOMOD=$(grep 'k8s.io/kubernetes' "${BASE_DIR}/../../tests/e2e/go.mod" | awk '{print $2}' | sed 's/^v//')
+K8S_VERSION_MAJOR_MINOR=$(echo "${K8S_VERSION_FROM_GOMOD}" | cut -d. -f1,2)
 
-KOPS_VERSION=${KOPS_VERSION:-1.34.0}
+# Resolve kOps version - find a valid release that supports the target k8s version
+if [[ -z "${KOPS_VERSION:-}" ]]; then
+  loudecho "Resolving kOps version for k8s ${K8S_VERSION_MAJOR_MINOR}..."
+  KOPS_VERSION=$(kops_resolve_version "${K8S_VERSION_MAJOR_MINOR}")
+  if [[ -z "${KOPS_VERSION}" ]]; then
+    loudecho "ERROR: Could not find a valid kOps release!"
+    exit 1
+  fi
+
+  KOPS_MAJOR_MINOR=$(echo "${KOPS_VERSION}" | cut -d. -f1,2)
+
+  # If kOps version doesn't match requested k8s version, align cluster version to kOps
+  if [[ "${KOPS_MAJOR_MINOR}" != "${K8S_VERSION_MAJOR_MINOR}" ]]; then
+    loudecho "WARNING: kOps v${KOPS_VERSION} found, but k8s ${K8S_VERSION_MAJOR_MINOR} was requested"
+    loudecho "WARNING: Aligning k8s cluster version to ${KOPS_VERSION} to match available kOps"
+    K8S_VERSION_FROM_GOMOD="${KOPS_VERSION}"
+    K8S_VERSION_MAJOR_MINOR="${KOPS_MAJOR_MINOR}"
+  fi
+
+  loudecho "Using kOps v${KOPS_VERSION} with k8s v${K8S_VERSION_FROM_GOMOD}"
+fi
+
+# kops: must include patch version (e.g. 1.34.0)
+# eksctl: mustn't include patch version (e.g. 1.34)
+K8S_VERSION_KOPS=${K8S_VERSION_KOPS:-${K8S_VERSION:-${K8S_VERSION_FROM_GOMOD}}}
+K8S_VERSION_EKSCTL=${K8S_VERSION_EKSCTL:-${K8S_VERSION:-${K8S_VERSION_MAJOR_MINOR}}}
+
 KOPS_STATE_FILE=${KOPS_STATE_FILE:-s3://k8s-kops-csi-shared-e2e}
 KOPS_PATCH_FILE=${KOPS_PATCH_FILE:-./hack/kops-patch.yaml}
 KOPS_PATCH_NODE_FILE=${KOPS_PATCH_NODE_FILE:-./hack/kops-patch-node.yaml}

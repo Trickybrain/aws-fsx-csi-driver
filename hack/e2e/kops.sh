@@ -7,6 +7,44 @@ OS_ARCH=$(go env GOOS)-amd64
 BASE_DIR=$(dirname "$(realpath "${BASH_SOURCE[0]}")")
 source "${BASE_DIR}"/util.sh
 
+function kops_resolve_version() {
+  local TARGET_MAJOR_MINOR=${1}
+
+  # Try the target major.minor version first (e.g. 1.35.0)
+  local CANDIDATE="${TARGET_MAJOR_MINOR}.0"
+  local URL="https://github.com/kubernetes/kops/releases/download/v${CANDIDATE}/kops-${OS_ARCH}"
+  local HTTP_STATUS
+  HTTP_STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "${URL}")
+  if [[ "${HTTP_STATUS}" == "302" || "${HTTP_STATUS}" == "200" ]]; then
+    echo "${CANDIDATE}"
+    return 0
+  fi
+
+  # Try one minor version down (e.g. 1.34.0)
+  local MAJOR MINOR
+  MAJOR=$(echo "${TARGET_MAJOR_MINOR}" | cut -d. -f1)
+  MINOR=$(echo "${TARGET_MAJOR_MINOR}" | cut -d. -f2)
+  if [[ ${MINOR} -gt 0 ]]; then
+    CANDIDATE="${MAJOR}.$((MINOR - 1)).0"
+    URL="https://github.com/kubernetes/kops/releases/download/v${CANDIDATE}/kops-${OS_ARCH}"
+    HTTP_STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "${URL}")
+    if [[ "${HTTP_STATUS}" == "302" || "${HTTP_STATUS}" == "200" ]]; then
+      echo "${CANDIDATE}"
+      return 0
+    fi
+  fi
+
+  # Fallback: get latest available release
+  local LATEST
+  LATEST=$(curl -s https://api.github.com/repos/kubernetes/kops/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+  if [[ -n "${LATEST}" ]]; then
+    echo "${LATEST}"
+    return 0
+  fi
+
+  return 1
+}
+
 function kops_install() {
   INSTALL_PATH=${1}
   KOPS_VERSION=${2}
@@ -18,6 +56,15 @@ function kops_install() {
     fi
   fi
   KOPS_DOWNLOAD_URL=https://github.com/kubernetes/kops/releases/download/v${KOPS_VERSION}/kops-${OS_ARCH}
+
+  # Verify the release exists before downloading
+  local HTTP_STATUS
+  HTTP_STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "${KOPS_DOWNLOAD_URL}")
+  if [[ "${HTTP_STATUS}" != "302" && "${HTTP_STATUS}" != "200" ]]; then
+    echo "ERROR: kOps v${KOPS_VERSION} not found at ${KOPS_DOWNLOAD_URL} (HTTP ${HTTP_STATUS})"
+    exit 1
+  fi
+
   curl -L -X GET "${KOPS_DOWNLOAD_URL}" -o "${INSTALL_PATH}"/kops
   chmod +x "${INSTALL_PATH}"/kops
 }
