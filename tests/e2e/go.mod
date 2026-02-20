@@ -174,7 +174,7 @@ replace (
 	vbom.ml/util => github.com/fvbommel/util v0.0.0-20180919145318-efcd4e0f9787
 )
 
-go 1.25.5
+go 1.25.6
 
 replace k8s.io/cri-client => k8s.io/cri-client v0.34.2
 

@@ -18,10 +18,17 @@ function kops_install() {
     fi
   fi
   KOPS_DOWNLOAD_URL=https://github.com/kubernetes/kops/releases/download/v${KOPS_VERSION}/kops-${OS_ARCH}
+
+  # Verify the release exists before downloading
+  HTTP_STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "${KOPS_DOWNLOAD_URL}")
+  if [[ "${HTTP_STATUS}" != "302" && "${HTTP_STATUS}" != "200" ]]; then
+    echo "ERROR: kOps v${KOPS_VERSION} not found at ${KOPS_DOWNLOAD_URL} (HTTP ${HTTP_STATUS})"
+    exit 1
+  fi
+
   curl -L -X GET "${KOPS_DOWNLOAD_URL}" -o "${INSTALL_PATH}"/kops
   chmod +x "${INSTALL_PATH}"/kops
 }
-
 function kops_create_cluster() {
   SSH_KEY_PATH=${1}
   CLUSTER_NAME=${2}
